@@ -158,33 +158,30 @@ func commandExists(cmd string) bool {
 	return err == nil
 }
 
-// getInput provides a unified way to get user input, trying system dialogs
-// before falling back to a tview TUI.
+// getInput provides a unified way to get user input
 func getInput(label, prompt string) (string, error) {
-	// Try kdialog
-	if commandExists("kdialog") {
-		cmd := exec.Command("kdialog", "--title", "ReadItLater", "--inputbox", prompt)
-		out, err := cmd.Output()
-		if err == nil {
-			return strings.TrimSpace(string(out)), nil
-		}
-	}
-
-	// Fallback to tview TUI
 	var result string
 	app := tview.NewApplication()
-	input := tview.NewInputField().
-		SetLabel(label).
-		SetFieldWidth(50)
+	form := tview.NewForm().
+		SetFieldTextColor(tcell.ColorWhite).
+		SetFieldBackgroundColor(tcell.ColorBlack).
+		SetButtonTextColor(tcell.ColorWhite).
+		SetButtonBackgroundColor(tcell.ColorDefault)
 
-	input.SetDoneFunc(func(key tcell.Key) {
-		if key == tcell.KeyEnter {
-			result = input.GetText()
-			app.Stop()
-		}
+	input := tview.NewInputField().SetLabel("Tag")
+	form.AddFormItem(input)
+	form.AddButton("Save", func() {
+		result = input.GetText()
+		app.Stop()
+	})
+	form.AddButton("Cancel", func() {
+		result = ""
+		app.Stop()
 	})
 
-	if err := app.SetRoot(input, true).SetFocus(input).Run(); err != nil {
+	form.SetBorder(true).SetTitle(prompt).SetTitleAlign(tview.AlignLeft)
+
+	if err := app.SetRoot(form, true).SetFocus(form).Run(); err != nil {
 		return "", fmt.Errorf("tview application failed: %v", err)
 	}
 	if result == "" {

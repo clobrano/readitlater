@@ -12,7 +12,7 @@ _This Go program was created by an AI, based on an initial bash script._
 -   **Intelligent Tagging:**
     -   For webpages, it calculates the estimated reading time and adds a `:reading:` tag with a length category (`:short:`, `:mid:`, or `:long:`).
     -   For YouTube videos, it fetches the video duration and adds a `:video:` tag with a length category.
--   **Interactive Input:** Uses `kdialog` for a graphical prompt to add custom tags and titles. It falls back to a terminal-based TUI with `tview` if `kdialog` is not installed.
+-   **Interactive Input:** Uses a terminal-based TUI with `tview` for adding custom tags and titles.
 -   **Duplicate Checking:** Prevents adding the same URL twice by checking both the main Org file and a list of archive files.
 -   **Mobile Compatibility:** The output file is in Org-mode format, which is supported by many applications on Android and iOS, making it convenient to read on mobile devices.
 -   **Android/Termux Support:** The tool can be installed and used on Android devices via Termux, providing a consistent command-line experience for saving URLs on both desktop and mobile.
@@ -26,7 +26,7 @@ To use this tool, you need to have the following installed on your system:
 -   **Go:** To build and install the program.
 -   **`html2text`**: A command-line utility to convert HTML to plain text. This is used for word count and reading time estimation.
 -   **A Clipboard Utility:** (optional) The program uses `wl-paste` by default for Wayland environments. You may need to adjust the `clipboardReader` function in the source code if you are using a different environment. Note that you can pass the URL as input, no need to access the clipboard.
--   **`kdialog` (Recommended):** (optional) For a graphical input dialog. If not available, the tool will gracefully fall back to a TUI using `tview`.
+
 
 
 ## Installation
