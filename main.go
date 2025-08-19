@@ -159,7 +159,7 @@ func commandExists(cmd string) bool {
 }
 
 // getInput provides a unified way to get user input
-func getInput(label, prompt string) (string, error) {
+func getInput(prompt string) (string, error) {
 	var result string
 	app := tview.NewApplication()
 	form := tview.NewForm().
@@ -170,6 +170,23 @@ func getInput(label, prompt string) (string, error) {
 
 	input := tview.NewInputField().SetLabel("Tag")
 	form.AddFormItem(input)
+	saveButton := tview.NewButton("Save")
+	cancelButton := tview.NewButton("Cancel")
+
+	// Set the background color for the selected state
+	saveButton.SetBackgroundColorActivated(tcell.ColorGreen)
+	cancelButton.SetBackgroundColorActivated(tcell.ColorRed)
+
+	saveButton.SetSelectedFunc(func() {
+		result = input.GetText()
+		app.Stop()
+	})
+
+	cancelButton.SetSelectedFunc(func() {
+		result = ""
+		app.Stop()
+	})
+
 	form.AddButton("Save", func() {
 		result = input.GetText()
 		app.Stop()
@@ -191,7 +208,7 @@ func getInput(label, prompt string) (string, error) {
 }
 
 func getTags() (string, error) {
-	tags, err := getInput("Tags (separated by :): ", "Tags separated by ':'")
+	tags, err := getInput("Tags separated by ':'")
 	if err != nil {
 		return "", err
 	}
@@ -199,7 +216,7 @@ func getTags() (string, error) {
 }
 
 func getTitle() (string, error) {
-	return getInput("Title: ", "Please, enter the Title manually")
+	return getInput("Please, enter the Title manually")
 }
 
 func checkDuplicate(u string) error {
