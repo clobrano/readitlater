@@ -198,7 +198,20 @@ func getInput(prompt string) (string, error) {
 
 	form.SetBorder(true).SetTitle(prompt).SetTitleAlign(tview.AlignLeft)
 
-	if err := app.SetRoot(form, true).SetFocus(form).Run(); err != nil {
+	// Set maximum dimensions for the TUI
+	const maxWidth = 80
+	const maxHeight = 10
+
+	// Create a flex container to center and limit the form dimensions
+	flex := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(form, maxHeight, 1, true).
+			AddItem(nil, 0, 1, false), maxWidth, 1, true).
+		AddItem(nil, 0, 1, false)
+
+	if err := app.SetRoot(flex, true).SetFocus(form).Run(); err != nil {
 		return "", fmt.Errorf("tview application failed: %v", err)
 	}
 	if result == "" {
