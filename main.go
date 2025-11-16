@@ -423,7 +423,7 @@ func processWebpage(rawURL string) {
 	creationDate := time.Now().Format("2006-01-02")
 	allTags := fmt.Sprintf(":%s:reading:%s", durationTag, customTags)
 
-	orgEntry := fmt.Sprintf(`* TODO %s %s
+	orgEntry := fmt.Sprintf(`* LATER %s %s
   :PROPERTIES:
   :CREATED: %s
   :LEN: %d
