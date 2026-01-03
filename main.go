@@ -19,6 +19,7 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"golang.org/x/net/html"
 )
 
 // Config struct to hold our configuration
@@ -356,6 +357,36 @@ func processYouTube(rawURL string) {
 	notify("Info", fmt.Sprintf("[%d] %s (%s) saved", durationMinutes, title, allTags))
 }
 
+// extractTextFromHTML converts HTML to plain text by extracting text content from HTML nodes
+func extractTextFromHTML(htmlContent string) (string, error) {
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		return "", err
+	}
+
+	var textBuilder strings.Builder
+	var traverse func(*html.Node)
+	traverse = func(n *html.Node) {
+		if n.Type == html.TextNode {
+			text := strings.TrimSpace(n.Data)
+			if text != "" {
+				textBuilder.WriteString(text)
+				textBuilder.WriteString(" ")
+			}
+		}
+		// Skip script and style tags
+		if n.Type == html.ElementNode && (n.Data == "script" || n.Data == "style") {
+			return
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			traverse(c)
+		}
+	}
+	traverse(doc)
+
+	return textBuilder.String(), nil
+}
+
 func processWebpage(rawURL string) {
 	if err := checkDuplicate(rawURL); err != nil {
 		return
@@ -396,17 +427,12 @@ func processWebpage(rawURL string) {
 		}
 	}
 
-	// Use html2text for content processing
-	// This requires the `html2text` command to be installed.
-	cmd := exec.Command("html2text")
-	cmd.Stdin = strings.NewReader(html)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		notify("Error", fmt.Sprintf("Failed to run html2text: %v", err))
+	// Use helper function to convert HTML to text for word count estimation
+	content, err := extractTextFromHTML(html)
+	if err != nil {
+		notify("Error", fmt.Sprintf("Failed to convert HTML to text: %v", err))
 		return
 	}
-	content := out.String()
 
 	// Calculate reading time
 	wordCount := len(strings.Fields(content))
