@@ -24,7 +24,6 @@ _This Go program was created by an AI, based on an initial bash script._
 To use this tool, you need to have the following installed on your system:
 
 -   **Go:** To build and install the program.
--   **`html2text`**: A command-line utility to convert HTML to plain text. This is used for word count and reading time estimation.
 -   **A Clipboard Utility:** (optional) The program uses `wl-paste` by default for Wayland environments. You may need to adjust the `clipboardReader` function in the source code if you are using a different environment. Note that you can pass the URL as input, no need to access the clipboard.
 
 
