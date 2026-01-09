@@ -61,6 +61,7 @@ The tool automatically generates a default configuration file located at `~/.con
 -   `backend`: The backend to use for storing URLs. Options are `"org"` (default) or `"taskwarrior"`.
 -   `org_filepath`: The path to the main Org-mode file where new entries will be saved (only used when backend is `"org"`).
 -   `org_archive_filepath`: A list of Org-mode files to check for duplicate URLs (only used when backend is `"org"`).
+-   `taskrc_path`: The path to the taskrc file for Taskwarrior (defaults to `$HOME/.taskrc`, only used when backend is `"taskwarrior"`).
 
 **Taskwarrior Configuration:**
 
@@ -68,28 +69,24 @@ To use the Taskwarrior backend, change the `backend` field to `"taskwarrior"`:
 
 ```json
 {
-  "backend": "taskwarrior"
+  "backend": "taskwarrior",
+  "taskrc_path": "$HOME/.taskrc"
 }
 ```
 
-You also need to configure Taskwarrior with custom UDA (User Defined Attributes) fields. Add the following to your `~/.taskrc` file:
+You also need to configure Taskwarrior with a custom UDA (User Defined Attribute) field. Add the following to your `~/.taskrc` file:
 
 ```
 uda.url.type=string
 uda.url.label=URL
-uda.len.type=numeric
-uda.len.label=Length
-uda.created.type=date
-uda.created.label=Created
 ```
 
 When using the Taskwarrior backend:
 - Tasks are created in the `readitlater` project
-- The page/video title becomes the task description
+- The task description includes the duration and title in the format: `[Xm] Title`
 - Tags include the duration category (`short`, `mid`, `long`), content type (`reading` or `video`), and any custom tags you provide
-- The URL is stored in the custom `url` field
-- The reading/viewing duration is stored in the custom `len` field
-- The creation date is stored in the custom `created` field
+- The URL is stored in the custom `url` UDA field
+- Taskwarrior's built-in creation date is used automatically
 
 
 ## Usage
@@ -162,12 +159,12 @@ task project:readitlater list
 
 Example task output:
 ```
-ID Project     Tags                    Description                                  URL
-1  readitlater long reading tech       My Awesome Article                           https://your.favorite.website.com/article
-2  readitlater mid video science       An interesting video - YouTube               https://www.youtube.com/watch?v=dQw4w9WgXcQ
+ID Project     Tags                    Description
+1  readitlater long reading tech       [45m] My Awesome Article
+2  readitlater mid video science       [15m] An interesting video - YouTube
 ```
 
-To view a specific task with all UDA fields:
+The URL is stored in the custom `url` field. To view a specific task with all fields including the URL:
 ```bash
 task 1 info
 ```

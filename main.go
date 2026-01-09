@@ -27,6 +27,7 @@ type Config struct {
 	Backend            string   `json:"backend"` // "org" or "taskwarrior"
 	OrgFilepath        string   `json:"org_filepath"`
 	OrgArchiveFilepath []string `json:"org_archive_filepath"`
+	TaskrcPath         string   `json:"taskrc_path"` // Path to taskrc file for taskwarrior backend
 }
 
 // Entry represents a processed URL with metadata
@@ -137,15 +138,20 @@ func (b *OrgBackend) SaveEntry(entry Entry) error {
 }
 
 // TaskwarriorBackend implements the Backend interface for Taskwarrior
-type TaskwarriorBackend struct{}
+type TaskwarriorBackend struct {
+	taskrcPath string
+}
 
-func NewTaskwarriorBackend() *TaskwarriorBackend {
-	return &TaskwarriorBackend{}
+func NewTaskwarriorBackend(taskrcPath string) *TaskwarriorBackend {
+	return &TaskwarriorBackend{
+		taskrcPath: taskrcPath,
+	}
 }
 
 func (b *TaskwarriorBackend) CheckDuplicate(url string) error {
 	// Query taskwarrior for tasks with matching URL
-	cmd := exec.Command("task", "rc.verbose=nothing", "url:"+url, "count")
+	args := []string{"rc:" + b.taskrcPath, "rc.verbose=nothing", "url:" + url, "count"}
+	cmd := exec.Command("task", args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err := cmd.Run()
@@ -163,11 +169,12 @@ func (b *TaskwarriorBackend) CheckDuplicate(url string) error {
 }
 
 func (b *TaskwarriorBackend) SaveEntry(entry Entry) error {
-	// Build taskwarrior command
-	// task add "<description>" project:readitlater +tag1 +tag2 url:<url> len:<duration>
-	args := []string{"add", entry.Title, "project:readitlater"}
+	// Build taskwarrior command with duration in description
+	// Format: [Xm] Title for reading, [X] Title for videos (duration in minutes)
+	description := fmt.Sprintf("[%dm] %s", entry.Duration, entry.Title)
+	args := []string{"rc:" + b.taskrcPath, "add", description, "project:readitlater"}
 
-	// Add tags
+	// Add tags (duration category, content type, and custom tags)
 	args = append(args, "+"+entry.DurationTag)
 	args = append(args, "+"+entry.Type)
 	for _, tag := range entry.Tags {
@@ -176,10 +183,8 @@ func (b *TaskwarriorBackend) SaveEntry(entry Entry) error {
 		}
 	}
 
-	// Add custom UDA fields
+	// Add custom UDA field (only url)
 	args = append(args, "url:"+entry.URL)
-	args = append(args, "len:"+strconv.Itoa(entry.Duration))
-	args = append(args, "created:"+entry.CreationDate)
 
 	cmd := exec.Command("task", args...)
 	var stderr bytes.Buffer
@@ -195,7 +200,7 @@ func (b *TaskwarriorBackend) SaveEntry(entry Entry) error {
 func getBackend() Backend {
 	switch config.Backend {
 	case "taskwarrior":
-		return NewTaskwarriorBackend()
+		return NewTaskwarriorBackend(config.TaskrcPath)
 	case "org":
 		fallthrough
 	default:
@@ -221,13 +226,11 @@ func main() {
 		fmt.Println("\nConfiguration:")
 		fmt.Println("  Edit ~/.config/readitlater/config.json to configure backend (org or taskwarrior)")
 		fmt.Println("\nTaskwarrior Setup:")
-		fmt.Println("  For taskwarrior backend, add these UDAs to ~/.taskrc:")
+		fmt.Println("  For taskwarrior backend, add this UDA to ~/.taskrc:")
 		fmt.Println("    uda.url.type=string")
 		fmt.Println("    uda.url.label=URL")
-		fmt.Println("    uda.len.type=numeric")
-		fmt.Println("    uda.len.label=Length")
-		fmt.Println("    uda.created.type=date")
-		fmt.Println("    uda.created.label=Created")
+		fmt.Println("  Duration is included in the task description as [Xm]")
+		fmt.Println("  Tags include: short/mid/long, reading/video, and your custom tags")
 		os.Exit(0)
 	}
 
@@ -272,10 +275,15 @@ func main() {
 func loadConfig() {
 	// Set default values to the XDG config directory
 	configDir := filepath.Join(xdg.ConfigHome, "readitlater")
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir = "~"
+	}
 	config = Config{
 		Backend:            "org",
 		OrgFilepath:        filepath.Join(configDir, "ReadItLater.org"),
 		OrgArchiveFilepath: []string{filepath.Join(configDir, "ReadItLater.org_archive"), filepath.Join(configDir, "Orgmode.org_archive")},
+		TaskrcPath:         filepath.Join(homeDir, ".taskrc"),
 	}
 
 	// Load from XDG config path
