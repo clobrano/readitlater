@@ -82,9 +82,9 @@ uda.url.label=URL
 ```
 
 When using the Taskwarrior backend:
-- Tasks are created in the `readitlater` project
+- Tasks are created with duration-based subprojects: `readitlater.short`, `readitlater.mid`, or `readitlater.long`
 - The task description includes the duration and title in the format: `[Xm] Title`
-- Tags include the duration category (`short`, `mid`, `long`), content type (`reading` or `video`), and any custom tags you provide
+- Tags include the content type (`reading` or `video`) and any custom tags you provide
 - The URL is stored in the custom `url` UDA field
 - Taskwarrior's built-in creation date is used automatically
 
@@ -159,9 +159,9 @@ task project:readitlater list
 
 Example task output:
 ```
-ID Project     Tags                    Description
-1  readitlater long reading tech       [45m] My Awesome Article
-2  readitlater mid video science       [15m] An interesting video - YouTube
+ID Project           Tags              Description
+1  readitlater.long  reading tech      [45m] My Awesome Article
+2  readitlater.mid   video science     [15m] An interesting video - YouTube
 ```
 
 The URL is stored in the custom `url` field. To view a specific task with all fields including the URL:
