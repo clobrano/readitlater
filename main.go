@@ -24,8 +24,10 @@ import (
 
 // Config struct to hold our configuration
 type Config struct {
-	OrgFilepath        string   `json:"org_filepath"`
-	OrgArchiveFilepath []string `json:"org_archive_filepath"`
+	OrgFilepath            string   `json:"org_filepath"`
+	OrgArchiveFilepath     []string `json:"org_archive_filepath"`
+	ShortDurationThreshold int      `json:"short_duration_threshold"` // minutes
+	MidDurationThreshold   int      `json:"mid_duration_threshold"`   // minutes
 }
 
 var (
@@ -103,8 +105,10 @@ func loadConfig() {
 	// Set default values to the XDG config directory
 	configDir := filepath.Join(xdg.ConfigHome, "readitlater")
 	config = Config{
-		OrgFilepath:        filepath.Join(configDir, "ReadItLater.org"),
-		OrgArchiveFilepath: []string{filepath.Join(configDir, "ReadItLater.org_archive"), filepath.Join(configDir, "Orgmode.org_archive")},
+		OrgFilepath:            filepath.Join(configDir, "ReadItLater.org"),
+		OrgArchiveFilepath:     []string{filepath.Join(configDir, "ReadItLater.org_archive"), filepath.Join(configDir, "Orgmode.org_archive")},
+		ShortDurationThreshold: 10, // minutes
+		MidDurationThreshold:   30, // minutes
 	}
 
 	// Load from XDG config path
@@ -319,9 +323,9 @@ func processYouTube(rawURL string) {
 
 	durationMinutes := durationSeconds / 60
 	durationTag := "long"
-	if durationMinutes <= 10 {
+	if durationMinutes <= config.ShortDurationThreshold {
 		durationTag = "short"
-	} else if durationMinutes <= 30 {
+	} else if durationMinutes <= config.MidDurationThreshold {
 		durationTag = "mid"
 	}
 
@@ -440,9 +444,9 @@ func processWebpage(rawURL string) {
 	readingTime := (wordCount / readingSpeed) + 1
 
 	durationTag := "long"
-	if readingTime <= 10 {
+	if readingTime <= config.ShortDurationThreshold {
 		durationTag = "short"
-	} else if readingTime <= 30 {
+	} else if readingTime <= config.MidDurationThreshold {
 		durationTag = "mid"
 	}
 
