@@ -22,10 +22,27 @@ import (
 	"golang.org/x/net/html"
 )
 
+// Column defines a table column configuration
+type Column struct {
+	Property string `json:"property"` // Property name (title, created, len, url, tags, comment)
+	Label    string `json:"label"`    // Display label for the column
+}
+
 // Config struct to hold our configuration
 type Config struct {
 	OrgFilepath        string   `json:"org_filepath"`
 	OrgArchiveFilepath []string `json:"org_archive_filepath"`
+	Columns            []Column `json:"columns"` // Configurable table columns
+}
+
+// Task represents a parsed task from Org-mode file
+type Task struct {
+	Title   string
+	Created string
+	Len     int
+	URL     string
+	Tags    string
+	Comment string
 }
 
 var (
@@ -61,11 +78,23 @@ func main() {
 		fmt.Println("  readitlater [URL]")
 		fmt.Println("\nOptions:")
 		fmt.Println("  --help, -h    Show this help message and exit.")
+		fmt.Println("  --view, -v    Show all saved tasks in a table view.")
 		fmt.Println("\nExamples:")
 		fmt.Println("  # Pass a URL directly as an argument")
 		fmt.Println("  readitlater https://example.com/article")
 		fmt.Println("\n  # Save the URL from the clipboard")
 		fmt.Println("  readitlater")
+		fmt.Println("\n  # View all saved tasks")
+		fmt.Println("  readitlater --view")
+		os.Exit(0)
+	}
+
+	// Handle --view flag
+	if len(os.Args) > 1 && (os.Args[1] == "--view" || os.Args[1] == "-v") {
+		if err := showTableView(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 
@@ -105,6 +134,14 @@ func loadConfig() {
 	config = Config{
 		OrgFilepath:        filepath.Join(configDir, "ReadItLater.org"),
 		OrgArchiveFilepath: []string{filepath.Join(configDir, "ReadItLater.org_archive"), filepath.Join(configDir, "Orgmode.org_archive")},
+		Columns: []Column{
+			{Property: "title", Label: "Title"},
+			{Property: "created", Label: "Created"},
+			{Property: "len", Label: "Length (min)"},
+			{Property: "url", Label: "URL"},
+			{Property: "tags", Label: "Tags"},
+			{Property: "comment", Label: "Comment"},
+		},
 	}
 
 	// Load from XDG config path
@@ -123,6 +160,19 @@ func loadConfig() {
 		if err == nil {
 			json.Unmarshal(data, &config)
 		}
+	}
+
+	// Ensure columns are set even if loaded config doesn't have them
+	if len(config.Columns) == 0 {
+		config.Columns = []Column{
+			{Property: "title", Label: "Title"},
+			{Property: "created", Label: "Created"},
+			{Property: "len", Label: "Length (min)"},
+			{Property: "url", Label: "URL"},
+			{Property: "tags", Label: "Tags"},
+			{Property: "comment", Label: "Comment"},
+		}
+		saveConfig() // Save the updated config with default columns
 	}
 }
 
@@ -472,4 +522,181 @@ func processWebpage(rawURL string) {
 	}
 
 	notify("Info", fmt.Sprintf("[%dm] %s (%s) saved", readingTime, title, allTags))
+}
+
+// parseTasks reads and parses tasks from Org-mode files
+func parseTasks() ([]Task, error) {
+	var tasks []Task
+	files := append([]string{config.OrgFilepath}, config.OrgArchiveFilepath...)
+
+	for _, filepath := range files {
+		if _, err := os.Stat(filepath); os.IsNotExist(err) {
+			continue
+		}
+
+		file, err := os.Open(filepath)
+		if err != nil {
+			continue
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		var currentTask *Task
+		inProperties := false
+
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			// Check for task heading (starts with * LATER)
+			if strings.HasPrefix(line, "* LATER ") {
+				// Save previous task if exists
+				if currentTask != nil {
+					tasks = append(tasks, *currentTask)
+				}
+
+				// Start new task
+				currentTask = &Task{}
+
+				// Remove "* LATER " prefix
+				remaining := strings.TrimPrefix(line, "* LATER ")
+
+				// Extract tags (everything after last :tag: pattern)
+				// Tags are at the end in format :tag1:tag2:tag3:
+				tagStart := -1
+				for i := len(remaining) - 1; i >= 0; i-- {
+					if remaining[i] == ':' {
+						// Found a colon, check if this is start of tags
+						if tagStart == -1 {
+							tagStart = i
+						}
+					} else if remaining[i] != ':' && tagStart != -1 {
+						// Found non-colon after tags, this is the title
+						break
+					}
+				}
+
+				if tagStart > 0 {
+					currentTask.Title = strings.TrimSpace(remaining[:tagStart])
+					currentTask.Tags = strings.TrimSpace(remaining[tagStart:])
+				} else {
+					currentTask.Title = strings.TrimSpace(remaining)
+					currentTask.Tags = ""
+				}
+			} else if strings.Contains(line, ":PROPERTIES:") {
+				inProperties = true
+			} else if strings.Contains(line, ":END:") {
+				inProperties = false
+			} else if inProperties && currentTask != nil {
+				// Parse property lines
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, ":CREATED:") {
+					currentTask.Created = strings.TrimSpace(strings.TrimPrefix(line, ":CREATED:"))
+				} else if strings.HasPrefix(line, ":LEN:") {
+					lenStr := strings.TrimSpace(strings.TrimPrefix(line, ":LEN:"))
+					currentTask.Len, _ = strconv.Atoi(lenStr)
+				} else if strings.HasPrefix(line, ":URL:") {
+					currentTask.URL = strings.TrimSpace(strings.TrimPrefix(line, ":URL:"))
+				} else if strings.HasPrefix(line, ":COMMENT:") {
+					currentTask.Comment = strings.TrimSpace(strings.TrimPrefix(line, ":COMMENT:"))
+				}
+			}
+		}
+
+		// Don't forget to add the last task
+		if currentTask != nil {
+			tasks = append(tasks, *currentTask)
+		}
+
+		file.Close()
+	}
+
+	return tasks, nil
+}
+
+// getTaskProperty returns the value of a task property by name
+func getTaskProperty(task Task, property string) string {
+	switch property {
+	case "title":
+		return task.Title
+	case "created":
+		return task.Created
+	case "len":
+		return fmt.Sprintf("%d", task.Len)
+	case "url":
+		return task.URL
+	case "tags":
+		return task.Tags
+	case "comment":
+		return task.Comment
+	default:
+		return ""
+	}
+}
+
+// showTableView displays tasks in a table view with configurable columns
+func showTableView() error {
+	tasks, err := parseTasks()
+	if err != nil {
+		return fmt.Errorf("failed to parse tasks: %v", err)
+	}
+
+	app := tview.NewApplication()
+	table := tview.NewTable().SetBorders(false).SetSelectable(true, false)
+
+	// Set table header with configured columns
+	for col, column := range config.Columns {
+		cell := tview.NewTableCell(column.Label).
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignLeft).
+			SetSelectable(false).
+			SetExpansion(1)
+		table.SetCell(0, col, cell)
+	}
+
+	// Populate table with task data
+	for row, task := range tasks {
+		for col, column := range config.Columns {
+			value := getTaskProperty(task, column.Property)
+			cell := tview.NewTableCell(value).
+				SetTextColor(tcell.ColorWhite).
+				SetAlign(tview.AlignLeft).
+				SetExpansion(1)
+			table.SetCell(row+1, col, cell)
+		}
+	}
+
+	// Set the selected style
+	table.SetSelectedStyle(tcell.Style{}.
+		Background(tcell.ColorDarkBlue).
+		Foreground(tcell.ColorWhite))
+
+	// Add key bindings
+	table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEscape:
+			app.Stop()
+			return nil
+		}
+		switch event.Rune() {
+		case 'q':
+			app.Stop()
+			return nil
+		}
+		return event
+	})
+
+	// Create a frame with instructions
+	frame := tview.NewFrame(table).
+		SetBorders(0, 0, 1, 0, 0, 0).
+		AddText("ReadItLater - Task View", true, tview.AlignCenter, tcell.ColorWhite).
+		AddText("Press 'q' or ESC to quit | Use arrow keys to navigate", false, tview.AlignCenter, tcell.ColorDarkGray)
+
+	// Select the first data row (skip header)
+	table.Select(1, 0)
+
+	if err := app.SetRoot(frame, true).SetFocus(table).Run(); err != nil {
+		return fmt.Errorf("failed to run table view: %v", err)
+	}
+
+	return nil
 }
