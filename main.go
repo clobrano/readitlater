@@ -172,10 +172,11 @@ func (b *TaskwarriorBackend) SaveEntry(entry Entry) error {
 	// Build taskwarrior command with duration in description
 	// Format: [Xm] Title for reading, [X] Title for videos (duration in minutes)
 	description := fmt.Sprintf("[%dm] %s", entry.Duration, entry.Title)
-	args := []string{"rc:" + b.taskrcPath, "add", description, "project:readitlater"}
+	// Use subproject format: readitlater.short, readitlater.mid, or readitlater.long
+	project := fmt.Sprintf("readitlater.%s", entry.DurationTag)
+	args := []string{"rc:" + b.taskrcPath, "add", description, "project:" + project}
 
-	// Add tags (duration category, content type, and custom tags)
-	args = append(args, "+"+entry.DurationTag)
+	// Add tags (content type and custom tags)
 	args = append(args, "+"+entry.Type)
 	for _, tag := range entry.Tags {
 		if tag != "" {
@@ -230,7 +231,8 @@ func main() {
 		fmt.Println("    uda.url.type=string")
 		fmt.Println("    uda.url.label=URL")
 		fmt.Println("  Duration is included in the task description as [Xm]")
-		fmt.Println("  Tags include: short/mid/long, reading/video, and your custom tags")
+		fmt.Println("  Duration categories (short/mid/long) are set as subprojects: readitlater.short, readitlater.mid, readitlater.long")
+		fmt.Println("  Tags include: reading/video, and your custom tags")
 		os.Exit(0)
 	}
 
