@@ -10,7 +10,7 @@ _This Go program was created by an AI, based on an initial bash script._
 -   **Command-Line Input:** Accepts a URL directly as a command-line argument.
 -   **Multiple Backend Support:** Choose between Org-mode files or Taskwarrior for storing your reading list.
 -   **Org-mode Output:** Generates a new `LATER` heading in a specified Org-mode file with a link to the page.
--   **Taskwarrior Integration:** Stores URLs as tasks in Taskwarrior with custom UDA fields for URL, length, and creation date.
+-   **Taskwarrior Integration:** Stores URLs as tasks in Taskwarrior with duration in the description and URL in a custom UDA field.
 -   **Intelligent Tagging:**
     -   For webpages, it calculates the estimated reading time and adds a `:reading:` tag with a length category (`:short:`, `:mid:`, or `:long:`).
     -   For YouTube videos, it fetches the video duration and adds a `:video:` tag with a length category.
