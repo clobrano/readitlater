@@ -24,8 +24,27 @@ import (
 
 // Config struct to hold our configuration
 type Config struct {
+	Backend            string   `json:"backend"` // "org" or "taskwarrior"
 	OrgFilepath        string   `json:"org_filepath"`
 	OrgArchiveFilepath []string `json:"org_archive_filepath"`
+	TaskrcPath         string   `json:"taskrc_path"` // Path to taskrc file for taskwarrior backend
+}
+
+// Entry represents a processed URL with metadata
+type Entry struct {
+	Title        string
+	URL          string
+	Tags         []string
+	Type         string // "video" or "reading"
+	Duration     int    // in minutes
+	DurationTag  string // "short", "mid", or "long"
+	CreationDate string
+}
+
+// Backend interface for different storage backends
+type Backend interface {
+	SaveEntry(entry Entry) error
+	CheckDuplicate(url string) error
 }
 
 var (
@@ -51,12 +70,150 @@ func init() {
 	}
 }
 
+// OrgBackend implements the Backend interface for Org-mode files
+type OrgBackend struct {
+	filepath        string
+	archiveFilepath []string
+}
+
+func NewOrgBackend(filepath string, archiveFilepath []string) *OrgBackend {
+	return &OrgBackend{
+		filepath:        filepath,
+		archiveFilepath: archiveFilepath,
+	}
+}
+
+func (b *OrgBackend) CheckDuplicate(url string) error {
+	files := append([]string{b.filepath}, b.archiveFilepath...)
+	for _, file := range files {
+		if _, err := os.Stat(file); os.IsNotExist(err) {
+			continue
+		}
+		f, err := os.Open(file)
+		if err != nil {
+			continue
+		}
+		defer f.Close()
+
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			if strings.Contains(scanner.Text(), url) {
+				notify("Warning", "Already in ReadItLater")
+				return fmt.Errorf("duplicate URL found")
+			}
+		}
+	}
+	return nil
+}
+
+func (b *OrgBackend) SaveEntry(entry Entry) error {
+	allTags := fmt.Sprintf(":%s:%s:", entry.DurationTag, entry.Type)
+	for _, tag := range entry.Tags {
+		if tag != "" {
+			allTags += tag + ":"
+		}
+	}
+
+	orgEntry := fmt.Sprintf(`* LATER %s %s
+  :PROPERTIES:
+  :CREATED: %s
+  :LEN: %d
+  :URL: %s
+  :COMMENT:
+  :END:
+  %s
+
+`, entry.Title, allTags, entry.CreationDate, entry.Duration, entry.URL, entry.URL)
+
+	f, err := os.OpenFile(b.filepath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %v", err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(orgEntry); err != nil {
+		return fmt.Errorf("failed to write to file: %v", err)
+	}
+
+	return nil
+}
+
+// TaskwarriorBackend implements the Backend interface for Taskwarrior
+type TaskwarriorBackend struct {
+	taskrcPath string
+}
+
+func NewTaskwarriorBackend(taskrcPath string) *TaskwarriorBackend {
+	return &TaskwarriorBackend{
+		taskrcPath: taskrcPath,
+	}
+}
+
+func (b *TaskwarriorBackend) CheckDuplicate(url string) error {
+	// Query taskwarrior for tasks with matching URL
+	args := []string{"rc:" + b.taskrcPath, "rc.verbose=nothing", "url:" + url, "count"}
+	cmd := exec.Command("task", args...)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to check duplicates in taskwarrior: %v", err)
+	}
+
+	count := strings.TrimSpace(out.String())
+	if count != "0" {
+		notify("Warning", "Already in ReadItLater")
+		return fmt.Errorf("duplicate URL found")
+	}
+
+	return nil
+}
+
+func (b *TaskwarriorBackend) SaveEntry(entry Entry) error {
+	// Build taskwarrior command with duration in description
+	// Format: [Xm] Title for reading, [X] Title for videos (duration in minutes)
+	description := fmt.Sprintf("[%dm] %s", entry.Duration, entry.Title)
+	args := []string{"rc:" + b.taskrcPath, "add", description, "project:readitlater"}
+
+	// Add tags (duration category, content type, and custom tags)
+	args = append(args, "+"+entry.DurationTag)
+	args = append(args, "+"+entry.Type)
+	for _, tag := range entry.Tags {
+		if tag != "" {
+			args = append(args, "+"+tag)
+		}
+	}
+
+	// Add custom UDA field (only url)
+	args = append(args, "url:"+entry.URL)
+
+	cmd := exec.Command("task", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to add task to taskwarrior: %v, stderr: %s", err, stderr.String())
+	}
+
+	return nil
+}
+
+func getBackend() Backend {
+	switch config.Backend {
+	case "taskwarrior":
+		return NewTaskwarriorBackend(config.TaskrcPath)
+	case "org":
+		fallthrough
+	default:
+		return NewOrgBackend(config.OrgFilepath, config.OrgArchiveFilepath)
+	}
+}
+
 func main() {
 	loadConfig()
 
 	// Handle --help flag
 	if len(os.Args) > 1 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		fmt.Println("ReadItLater - A tool to save URLs to an Org-mode file.")
+		fmt.Println("ReadItLater - A tool to save URLs to an Org-mode file or Taskwarrior.")
 		fmt.Println("Usage:")
 		fmt.Println("  readitlater [URL]")
 		fmt.Println("\nOptions:")
@@ -66,12 +223,28 @@ func main() {
 		fmt.Println("  readitlater https://example.com/article")
 		fmt.Println("\n  # Save the URL from the clipboard")
 		fmt.Println("  readitlater")
+		fmt.Println("\nConfiguration:")
+		fmt.Println("  Edit ~/.config/readitlater/config.json to configure backend (org or taskwarrior)")
+		fmt.Println("\nTaskwarrior Setup:")
+		fmt.Println("  For taskwarrior backend, add this UDA to ~/.taskrc:")
+		fmt.Println("    uda.url.type=string")
+		fmt.Println("    uda.url.label=URL")
+		fmt.Println("  Duration is included in the task description as [Xm]")
+		fmt.Println("  Tags include: short/mid/long, reading/video, and your custom tags")
 		os.Exit(0)
 	}
 
-	if _, err := os.Stat(config.OrgFilepath); os.IsNotExist(err) {
-		notify("Warning", fmt.Sprintf("Could not find: %s", config.OrgFilepath))
-		os.Exit(1)
+	// Validate backend requirements
+	if config.Backend == "org" {
+		if _, err := os.Stat(config.OrgFilepath); os.IsNotExist(err) {
+			notify("Warning", fmt.Sprintf("Could not find: %s", config.OrgFilepath))
+			os.Exit(1)
+		}
+	} else if config.Backend == "taskwarrior" {
+		if !commandExists("task") {
+			notify("Error", "Taskwarrior (task) command not found. Please install taskwarrior.")
+			os.Exit(1)
+		}
 	}
 
 	var rawURL string
@@ -102,9 +275,15 @@ func main() {
 func loadConfig() {
 	// Set default values to the XDG config directory
 	configDir := filepath.Join(xdg.ConfigHome, "readitlater")
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir = "~"
+	}
 	config = Config{
+		Backend:            "org",
 		OrgFilepath:        filepath.Join(configDir, "ReadItLater.org"),
 		OrgArchiveFilepath: []string{filepath.Join(configDir, "ReadItLater.org_archive"), filepath.Join(configDir, "Orgmode.org_archive")},
+		TaskrcPath:         filepath.Join(homeDir, ".taskrc"),
 	}
 
 	// Load from XDG config path
@@ -233,30 +412,9 @@ func getTitle() (string, error) {
 	return getInput("Please, enter the Title manually")
 }
 
-func checkDuplicate(u string) error {
-	files := append([]string{config.OrgFilepath}, config.OrgArchiveFilepath...)
-	for _, file := range files {
-		if _, err := os.Stat(file); os.IsNotExist(err) {
-			continue
-		}
-		f, err := os.Open(file)
-		if err != nil {
-			continue
-		}
-		defer f.Close()
-
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			if strings.Contains(scanner.Text(), u) {
-				notify("Warning", "Already in ReadItLater")
-				return fmt.Errorf("duplicate URL found")
-			}
-		}
-	}
-	return nil
-}
-
 func processYouTube(rawURL string) {
+	backend := getBackend()
+
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		notify("Error", "Invalid URL")
@@ -271,7 +429,7 @@ func processYouTube(rawURL string) {
 
 	url := u.String()
 
-	if err := checkDuplicate(url); err != nil {
+	if err := backend.CheckDuplicate(url); err != nil {
 		return
 	}
 
@@ -329,32 +487,31 @@ func processYouTube(rawURL string) {
 	title = strings.ReplaceAll(title, "\"", "")
 	title = strings.ReplaceAll(title, "-", "")
 
-	allTags := fmt.Sprintf(":%s:video:%s", durationTag, customTags)
-	creationDate := time.Now().Format("2006-01-02")
-
-	orgEntry := fmt.Sprintf(`* LATER %s %s
-  :PROPERTIES:
-  :CREATED: %s
-  :LEN: %d
-  :URL: %s
-  :COMMENT:
-  :END:
-  %s
-
-`, title, allTags, creationDate, durationMinutes, url, url)
-
-	f, err := os.OpenFile(config.OrgFilepath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		notify("Error", fmt.Sprintf("Failed to open file: %v", err))
-		return
-	}
-	defer f.Close()
-	if _, err := f.WriteString(orgEntry); err != nil {
-		notify("Error", fmt.Sprintf("Failed to write to file: %v", err))
-		return
+	// Parse custom tags
+	var tagList []string
+	if customTags != "" {
+		customTags = strings.Trim(customTags, ":")
+		if customTags != "" {
+			tagList = strings.Split(customTags, ":")
+		}
 	}
 
-	notify("Info", fmt.Sprintf("[%d] %s (%s) saved", durationMinutes, title, allTags))
+	entry := Entry{
+		Title:        title,
+		URL:          url,
+		Tags:         tagList,
+		Type:         "video",
+		Duration:     durationMinutes,
+		DurationTag:  durationTag,
+		CreationDate: time.Now().Format("2006-01-02"),
+	}
+
+	if err := backend.SaveEntry(entry); err != nil {
+		notify("Error", fmt.Sprintf("Failed to save entry: %v", err))
+		return
+	}
+
+	notify("Info", fmt.Sprintf("[%d] %s saved", durationMinutes, title))
 }
 
 // extractTextFromHTML converts HTML to plain text by extracting text content from HTML nodes
@@ -388,7 +545,9 @@ func extractTextFromHTML(htmlContent string) (string, error) {
 }
 
 func processWebpage(rawURL string) {
-	if err := checkDuplicate(rawURL); err != nil {
+	backend := getBackend()
+
+	if err := backend.CheckDuplicate(rawURL); err != nil {
 		return
 	}
 
@@ -446,30 +605,29 @@ func processWebpage(rawURL string) {
 		durationTag = "mid"
 	}
 
-	creationDate := time.Now().Format("2006-01-02")
-	allTags := fmt.Sprintf(":%s:reading:%s", durationTag, customTags)
-
-	orgEntry := fmt.Sprintf(`* LATER %s %s
-  :PROPERTIES:
-  :CREATED: %s
-  :LEN: %d
-  :URL: %s
-  :COMMENT:
-  :END:
-  %s
-
-`, title, allTags, creationDate, readingTime, rawURL, rawURL)
-
-	f, err := os.OpenFile(config.OrgFilepath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		notify("Error", fmt.Sprintf("Failed to open file: %v", err))
-		return
-	}
-	defer f.Close()
-	if _, err := f.WriteString(orgEntry); err != nil {
-		notify("Error", fmt.Sprintf("Failed to write to file: %v", err))
-		return
+	// Parse custom tags
+	var tagList []string
+	if customTags != "" {
+		customTags = strings.Trim(customTags, ":")
+		if customTags != "" {
+			tagList = strings.Split(customTags, ":")
+		}
 	}
 
-	notify("Info", fmt.Sprintf("[%dm] %s (%s) saved", readingTime, title, allTags))
+	entry := Entry{
+		Title:        title,
+		URL:          rawURL,
+		Tags:         tagList,
+		Type:         "reading",
+		Duration:     readingTime,
+		DurationTag:  durationTag,
+		CreationDate: time.Now().Format("2006-01-02"),
+	}
+
+	if err := backend.SaveEntry(entry); err != nil {
+		notify("Error", fmt.Sprintf("Failed to save entry: %v", err))
+		return
+	}
+
+	notify("Info", fmt.Sprintf("[%dm] %s saved", readingTime, title))
 }
