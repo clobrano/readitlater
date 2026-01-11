@@ -380,9 +380,35 @@ func getInput(prompt string) (string, error) {
 
 	form.SetBorder(true).SetTitle(prompt).SetTitleAlign(tview.AlignLeft)
 
-	// Set maximum dimensions for the TUI
-	const maxWidth = 80
-	const maxHeight = 10
+	// Get terminal dimensions and calculate responsive max dimensions
+	screen, err := tcell.NewScreen()
+	var maxWidth, maxHeight int
+	if err == nil {
+		if initErr := screen.Init(); initErr == nil {
+			termWidth, termHeight := screen.Size()
+			screen.Fini()
+
+			// Use 90% of terminal width, but cap at 80 chars and ensure minimum of 30
+			maxWidth = min(80, termWidth*9/10)
+			if maxWidth < 30 {
+				maxWidth = min(30, termWidth)
+			}
+
+			// Use 80% of terminal height, but cap at 10 lines and ensure minimum of 8
+			maxHeight = min(10, termHeight*8/10)
+			if maxHeight < 8 {
+				maxHeight = min(8, termHeight)
+			}
+		} else {
+			// Fallback to reasonable defaults if screen init fails
+			maxWidth = 60
+			maxHeight = 8
+		}
+	} else {
+		// Fallback to reasonable defaults if screen creation fails
+		maxWidth = 60
+		maxHeight = 8
+	}
 
 	// Create a flex container to center and limit the form dimensions
 	flex := tview.NewFlex().
