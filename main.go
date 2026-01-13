@@ -176,8 +176,7 @@ func (b *TaskwarriorBackend) SaveEntry(entry Entry) error {
 	project := fmt.Sprintf("readitlater.%s", entry.DurationTag)
 	args := []string{"rc:" + b.taskrcPath, "add", description, "project:" + project}
 
-	// Add tags (duration category, content type and custom tags)
-	args = append(args, "+"+entry.DurationTag)
+	// Add tags (content type and custom tags)
 	args = append(args, "+"+entry.Type)
 	for _, tag := range entry.Tags {
 		if tag != "" {
