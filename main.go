@@ -39,6 +39,7 @@ type Entry struct {
 	Duration     int    // in minutes
 	DurationTag  string // "short", "mid", or "long"
 	CreationDate string
+	Description  string // Optional description (used for taskwarrior annotations)
 }
 
 // Backend interface for different storage backends
@@ -189,10 +190,32 @@ func (b *TaskwarriorBackend) SaveEntry(entry Entry) error {
 
 	cmd := exec.Command("task", args...)
 	var stderr bytes.Buffer
+	var stdout bytes.Buffer
 	cmd.Stderr = &stderr
+	cmd.Stdout = &stdout
 	err := cmd.Run()
 	if err != nil {
 		return fmt.Errorf("failed to add task to taskwarrior: %v, stderr: %s", err, stderr.String())
+	}
+
+	// If there's a description, add it as an annotation
+	if entry.Description != "" {
+		// Extract task ID from stdout (format: "Created task 123.")
+		output := stdout.String()
+		re := regexp.MustCompile(`Created task (\d+)`)
+		matches := re.FindStringSubmatch(output)
+		if len(matches) > 1 {
+			taskID := matches[1]
+			// Add annotation
+			annotateArgs := []string{"rc:" + b.taskrcPath, taskID, "annotate", entry.Description}
+			annotateCmd := exec.Command("task", annotateArgs...)
+			var annotateStderr bytes.Buffer
+			annotateCmd.Stderr = &annotateStderr
+			if err := annotateCmd.Run(); err != nil {
+				// Don't fail the whole operation if annotation fails, just log it
+				fmt.Fprintf(os.Stderr, "Warning: failed to add annotation: %v, stderr: %s\n", err, annotateStderr.String())
+			}
+		}
 	}
 
 	return nil
@@ -266,9 +289,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Simple check for YouTube URL
+	// Check for different URL types
 	if strings.Contains(rawURL, "youtube.com") || strings.Contains(rawURL, "youtu.be") {
 		processYouTube(rawURL)
+	} else if strings.Contains(rawURL, "netflix.com") {
+		processNetflix(rawURL)
 	} else {
 		processWebpage(rawURL)
 	}
@@ -540,6 +565,165 @@ func processYouTube(rawURL string) {
 	}
 
 	notify("Info", fmt.Sprintf("[%d] %s saved", durationMinutes, title))
+}
+
+func processNetflix(rawURL string) {
+	backend := getBackend()
+
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		notify("Error", "Invalid URL")
+		return
+	}
+	// Normalize Netflix URL - keep only the base path without query parameters
+	// Example: https://www.netflix.com/it/title/81239598?s=a&... -> https://www.netflix.com/title/81239598
+	pathParts := strings.Split(u.Path, "/")
+	var cleanPath string
+	for i, part := range pathParts {
+		if part == "title" && i+1 < len(pathParts) {
+			cleanPath = "/title/" + pathParts[i+1]
+			break
+		}
+	}
+	if cleanPath == "" {
+		cleanPath = u.Path
+	}
+	u.Path = cleanPath
+	u.RawQuery = ""
+	cleanURL := u.String()
+
+	if err := backend.CheckDuplicate(cleanURL); err != nil {
+		return
+	}
+
+	customTags, err := getTags()
+	if err != nil {
+		notify("Error", fmt.Sprintf("Failed to get tags: %v", err))
+		return
+	}
+
+	// Fetch Netflix page with user agent
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		notify("Error", fmt.Sprintf("Failed to create request: %v", err))
+		return
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	resp, err := client.Do(req)
+	if err != nil {
+		notify("Error", fmt.Sprintf("Failed to fetch Netflix page: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		notify("Error", fmt.Sprintf("Failed to read Netflix page body: %v", err))
+		return
+	}
+	htmlContent := string(body)
+
+	// Extract metadata from Open Graph tags and other meta tags
+	var title, description string
+	var durationMinutes int
+
+	// Try to extract title from og:title meta tag
+	ogTitleRe := regexp.MustCompile(`<meta\s+property="og:title"\s+content="([^"]+)"`)
+	if match := ogTitleRe.FindStringSubmatch(htmlContent); len(match) > 1 {
+		title = match[1]
+	}
+
+	// Fallback to regular title tag
+	if title == "" {
+		titleRe := regexp.MustCompile(`<title>(.*?)</title>`)
+		if match := titleRe.FindStringSubmatch(htmlContent); len(match) > 1 {
+			title = match[1]
+			// Clean up title (remove " - Netflix" suffix)
+			title = strings.TrimSuffix(title, " - Netflix")
+			title = strings.TrimSpace(title)
+		}
+	}
+
+	// Try to extract description from og:description meta tag
+	ogDescRe := regexp.MustCompile(`<meta\s+property="og:description"\s+content="([^"]+)"`)
+	if match := ogDescRe.FindStringSubmatch(htmlContent); len(match) > 1 {
+		description = match[1]
+		// Decode HTML entities
+		description = strings.ReplaceAll(description, "&quot;", "\"")
+		description = strings.ReplaceAll(description, "&amp;", "&")
+		description = strings.ReplaceAll(description, "&lt;", "<")
+		description = strings.ReplaceAll(description, "&gt;", ">")
+	}
+
+	// Try to extract duration from JSON-LD structured data (ISO 8601 format like PT1H30M)
+	jsonLdRe := regexp.MustCompile(`"duration"\s*:\s*"PT(\d+H)?(\d+M)?"`)
+	if match := jsonLdRe.FindStringSubmatch(htmlContent); len(match) > 0 {
+		hours := 0
+		minutes := 0
+		if match[1] != "" {
+			hours, _ = strconv.Atoi(strings.TrimSuffix(match[1], "H"))
+		}
+		if match[2] != "" {
+			minutes, _ = strconv.Atoi(strings.TrimSuffix(match[2], "M"))
+		}
+		durationMinutes = hours*60 + minutes
+	}
+
+	// If we couldn't get title, try manual input
+	if title == "" {
+		title, err = getTitle()
+		if err != nil {
+			notify("Error", "Could not get title")
+			return
+		}
+	}
+
+	// If we don't have duration, make a reasonable default based on content type
+	// Netflix movies are typically 90-120 minutes, series episodes are 30-60 minutes
+	// We'll default to 90 minutes (mid-length) as a best guess
+	if durationMinutes == 0 {
+		durationMinutes = 90
+	}
+
+	// Categorize duration
+	durationTag := "long"
+	if durationMinutes <= 10 {
+		durationTag = "short"
+	} else if durationMinutes <= 30 {
+		durationTag = "mid"
+	}
+
+	// Clean title
+	title = strings.ReplaceAll(title, "\"", "")
+
+	// Parse custom tags
+	var tagList []string
+	if customTags != "" {
+		customTags = strings.Trim(customTags, ":")
+		if customTags != "" {
+			tagList = strings.Split(customTags, ":")
+		}
+	}
+
+	entry := Entry{
+		Title:        title,
+		URL:          cleanURL,
+		Tags:         tagList,
+		Type:         "video",
+		Duration:     durationMinutes,
+		DurationTag:  durationTag,
+		CreationDate: time.Now().Format("2006-01-02"),
+		Description:  description,
+	}
+
+	if err := backend.SaveEntry(entry); err != nil {
+		notify("Error", fmt.Sprintf("Failed to save entry: %v", err))
+		return
+	}
+
+	notify("Info", fmt.Sprintf("[%dm] %s saved", durationMinutes, title))
 }
 
 // extractTextFromHTML converts HTML to plain text by extracting text content from HTML nodes
