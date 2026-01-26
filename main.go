@@ -341,7 +341,7 @@ func commandExists(cmd string) bool {
 }
 
 // getInput provides a unified way to get user input
-func getInput(prompt string) (string, error) {
+func getInput(prompt string, label string) (string, error) {
 	var result string
 	app := tview.NewApplication()
 	form := tview.NewForm().
@@ -350,7 +350,7 @@ func getInput(prompt string) (string, error) {
 		SetButtonTextColor(tcell.ColorWhite).
 		SetButtonBackgroundColor(tcell.ColorDefault)
 
-	input := tview.NewInputField().SetLabel("Tag")
+	input := tview.NewInputField().SetLabel(label)
 	form.AddFormItem(input)
 	saveButton := tview.NewButton("Save")
 	cancelButton := tview.NewButton("Cancel")
@@ -429,7 +429,7 @@ func getInput(prompt string) (string, error) {
 }
 
 func getTags() (string, error) {
-	tags, err := getInput("Tags separated by ':'")
+	tags, err := getInput("Tags separated by ':'", "Tags")
 	if err != nil {
 		return "", err
 	}
@@ -437,7 +437,7 @@ func getTags() (string, error) {
 }
 
 func getTitle() (string, error) {
-	return getInput("Please, enter the Title manually")
+	return getInput("Please, enter the Title manually", "Title")
 }
 
 func processYouTube(rawURL string) {
