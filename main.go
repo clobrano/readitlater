@@ -197,11 +197,17 @@ func (b *TaskwarriorBackend) SaveEntry(entry Entry) error {
 
 	// Add URL as annotation using +LATEST virtual tag
 	annotateArgs := []string{"rc:" + b.taskrcPath, "rc.confirmation=off", "+LATEST", "annotate", "url: " + entry.URL}
+	fmt.Printf("DEBUG: Running annotate command: task %v\n", annotateArgs)
 	annotateCmd := exec.Command("task", annotateArgs...)
-	annotateCmd.Stderr = &stderr
+	var annotateStdout bytes.Buffer
+	var annotateStderr bytes.Buffer
+	annotateCmd.Stdout = &annotateStdout
+	annotateCmd.Stderr = &annotateStderr
 	if err := annotateCmd.Run(); err != nil {
-		return fmt.Errorf("failed to add URL annotation: %v, stderr: %s", err, stderr.String())
+		return fmt.Errorf("failed to add URL annotation: %v, stderr: %s", err, annotateStderr.String())
 	}
+	fmt.Printf("DEBUG: Annotate stdout: %s\n", annotateStdout.String())
+	fmt.Printf("DEBUG: Annotate stderr: %s\n", annotateStderr.String())
 
 	return nil
 }
