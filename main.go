@@ -196,7 +196,7 @@ func (b *TaskwarriorBackend) SaveEntry(entry Entry) error {
 	}
 
 	// Add URL as annotation using +LATEST virtual tag
-	annotateArgs := []string{"rc:" + b.taskrcPath, "+LATEST", "annotate", "url: " + entry.URL}
+	annotateArgs := []string{"rc:" + b.taskrcPath, "rc.confirmation=off", "+LATEST", "annotate", "url: " + entry.URL}
 	annotateCmd := exec.Command("task", annotateArgs...)
 	annotateCmd.Stderr = &stderr
 	if err := annotateCmd.Run(); err != nil {
