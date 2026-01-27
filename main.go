@@ -188,11 +188,26 @@ func (b *TaskwarriorBackend) SaveEntry(entry Entry) error {
 	args = append(args, "url:"+entry.URL)
 
 	cmd := exec.Command("task", args...)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
 		return fmt.Errorf("failed to add task to taskwarrior: %v, stderr: %s", err, stderr.String())
+	}
+
+	// Extract task ID from output (format: "Created task 123.")
+	taskIDRe := regexp.MustCompile(`Created task (\d+)`)
+	match := taskIDRe.FindStringSubmatch(stdout.String())
+	if len(match) > 1 {
+		taskID := match[1]
+		// Add URL as annotation
+		annotateArgs := []string{"rc:" + b.taskrcPath, taskID, "annotate", "url: " + entry.URL}
+		annotateCmd := exec.Command("task", annotateArgs...)
+		annotateCmd.Stderr = &stderr
+		if err := annotateCmd.Run(); err != nil {
+			return fmt.Errorf("failed to add URL annotation: %v, stderr: %s", err, stderr.String())
+		}
 	}
 
 	return nil
