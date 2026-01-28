@@ -195,6 +195,21 @@ func (b *TaskwarriorBackend) SaveEntry(entry Entry) error {
 		return fmt.Errorf("failed to add task to taskwarrior: %v, stderr: %s", err, stderr.String())
 	}
 
+	// Add URL as annotation using +LATEST virtual tag
+	// Use "--" to prevent "url:" from being parsed as a UDA modifier
+	annotateArgs := []string{"rc:" + b.taskrcPath, "rc.confirmation=off", "+LATEST", "annotate", "--", "url: " + entry.URL}
+	fmt.Printf("DEBUG: Running annotate command: task %v\n", annotateArgs)
+	annotateCmd := exec.Command("task", annotateArgs...)
+	var annotateStdout bytes.Buffer
+	var annotateStderr bytes.Buffer
+	annotateCmd.Stdout = &annotateStdout
+	annotateCmd.Stderr = &annotateStderr
+	if err := annotateCmd.Run(); err != nil {
+		return fmt.Errorf("failed to add URL annotation: %v, stderr: %s", err, annotateStderr.String())
+	}
+	fmt.Printf("DEBUG: Annotate stdout: %s\n", annotateStdout.String())
+	fmt.Printf("DEBUG: Annotate stderr: %s\n", annotateStderr.String())
+
 	return nil
 }
 
