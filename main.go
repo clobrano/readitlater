@@ -455,6 +455,79 @@ func getTitle() (string, error) {
 	return getInput("Please, enter the Title manually", "Title")
 }
 
+// sanitizeTitle cleans up a title by decoding HTML entities, expanding
+// contractions, removing possessive 's, and stripping quotes.
+func sanitizeTitle(title string) string {
+	// Decode HTML entities (e.g. &#39; -> ', &amp; -> &)
+	title = html.UnescapeString(title)
+
+	// Expand common contractions (case-insensitive)
+	contractions := []struct {
+		pattern     *regexp.Regexp
+		replacement string
+	}{
+		{regexp.MustCompile(`(?i)\bcan'?t\b`), "cannot"},
+		{regexp.MustCompile(`(?i)\bwon'?t\b`), "will not"},
+		{regexp.MustCompile(`(?i)\bshan'?t\b`), "shall not"},
+		{regexp.MustCompile(`(?i)\bdon'?t\b`), "do not"},
+		{regexp.MustCompile(`(?i)\bdoesn'?t\b`), "does not"},
+		{regexp.MustCompile(`(?i)\bdidn'?t\b`), "did not"},
+		{regexp.MustCompile(`(?i)\bisn'?t\b`), "is not"},
+		{regexp.MustCompile(`(?i)\baren'?t\b`), "are not"},
+		{regexp.MustCompile(`(?i)\bwasn'?t\b`), "was not"},
+		{regexp.MustCompile(`(?i)\bweren'?t\b`), "were not"},
+		{regexp.MustCompile(`(?i)\bhasn'?t\b`), "has not"},
+		{regexp.MustCompile(`(?i)\bhaven'?t\b`), "have not"},
+		{regexp.MustCompile(`(?i)\bhadn'?t\b`), "had not"},
+		{regexp.MustCompile(`(?i)\bcouldn'?t\b`), "could not"},
+		{regexp.MustCompile(`(?i)\bwouldn'?t\b`), "would not"},
+		{regexp.MustCompile(`(?i)\bshouldn'?t\b`), "should not"},
+		{regexp.MustCompile(`(?i)\bmustn'?t\b`), "must not"},
+		{regexp.MustCompile(`(?i)\bi'?m\b`), "I am"},
+		{regexp.MustCompile(`(?i)\byou'?re\b`), "you are"},
+		{regexp.MustCompile(`(?i)\bwe'?re\b`), "we are"},
+		{regexp.MustCompile(`(?i)\bthey'?re\b`), "they are"},
+		{regexp.MustCompile(`(?i)\bi'?ve\b`), "I have"},
+		{regexp.MustCompile(`(?i)\byou'?ve\b`), "you have"},
+		{regexp.MustCompile(`(?i)\bwe'?ve\b`), "we have"},
+		{regexp.MustCompile(`(?i)\bthey'?ve\b`), "they have"},
+		{regexp.MustCompile(`(?i)\bi'?ll\b`), "I will"},
+		{regexp.MustCompile(`(?i)\byou'?ll\b`), "you will"},
+		{regexp.MustCompile(`(?i)\bwe'?ll\b`), "we will"},
+		{regexp.MustCompile(`(?i)\bthey'?ll\b`), "they will"},
+		{regexp.MustCompile(`(?i)\bi'?d\b`), "I would"},
+		{regexp.MustCompile(`(?i)\byou'?d\b`), "you would"},
+		{regexp.MustCompile(`(?i)\bwe'?d\b`), "we would"},
+		{regexp.MustCompile(`(?i)\bthey'?d\b`), "they would"},
+		{regexp.MustCompile(`(?i)\bit'?s\b`), "it is"},
+		{regexp.MustCompile(`(?i)\bthat'?s\b`), "that is"},
+		{regexp.MustCompile(`(?i)\bwhat'?s\b`), "what is"},
+		{regexp.MustCompile(`(?i)\bwho'?s\b`), "who is"},
+		{regexp.MustCompile(`(?i)\bwhere'?s\b`), "where is"},
+		{regexp.MustCompile(`(?i)\bhere'?s\b`), "here is"},
+		{regexp.MustCompile(`(?i)\bthere'?s\b`), "there is"},
+		{regexp.MustCompile(`(?i)\blet'?s\b`), "let us"},
+	}
+
+	for _, c := range contractions {
+		title = c.pattern.ReplaceAllString(title, c.replacement)
+	}
+
+	// Drop possessive 's (e.g. "World's" -> "World")
+	possessiveRe := regexp.MustCompile(`(\w)'s\b`)
+	title = possessiveRe.ReplaceAllString(title, "${1}")
+
+	// Remove any remaining single and double quotes
+	title = strings.ReplaceAll(title, "'", "")
+	title = strings.ReplaceAll(title, "\"", "")
+	title = strings.ReplaceAll(title, "\u2018", "") // left single quote
+	title = strings.ReplaceAll(title, "\u2019", "") // right single quote
+	title = strings.ReplaceAll(title, "\u201c", "") // left double quote
+	title = strings.ReplaceAll(title, "\u201d", "") // right double quote
+
+	return strings.TrimSpace(title)
+}
+
 func processYouTube(rawURL string) {
 	backend := getBackend()
 
@@ -526,8 +599,8 @@ func processYouTube(rawURL string) {
 		durationTag = "mid"
 	}
 
-	// Escape quotes and dashes
-	title = strings.ReplaceAll(title, "\"", "")
+	// Sanitize title
+	title = sanitizeTitle(title)
 	title = strings.ReplaceAll(title, "-", "")
 
 	// Parse custom tags
@@ -628,6 +701,7 @@ func processWebpage(rawURL string) {
 			return
 		}
 	}
+	title = sanitizeTitle(title)
 
 	// Use helper function to convert HTML to text for word count estimation
 	content, err := extractTextFromHTML(html)
