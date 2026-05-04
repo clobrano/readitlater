@@ -217,9 +217,7 @@ func getBackend() Backend {
 	switch config.Backend {
 	case "taskwarrior":
 		return NewTaskwarriorBackend(config.TaskrcPath)
-	case "org":
-		fallthrough
-	default:
+	default: // "org"
 		return NewOrgBackend(config.OrgFilepath, config.OrgArchiveFilepath)
 	}
 }
@@ -252,12 +250,7 @@ func main() {
 	}
 
 	// Validate backend requirements
-	if config.Backend == "org" {
-		if _, err := os.Stat(config.OrgFilepath); os.IsNotExist(err) {
-			notify("Warning", fmt.Sprintf("Could not find: %s", config.OrgFilepath))
-			os.Exit(1)
-		}
-	} else if config.Backend == "taskwarrior" {
+	if config.Backend == "taskwarrior" {
 		if !commandExists("task") {
 			notify("Error", "Taskwarrior (task) command not found. Please install taskwarrior.")
 			os.Exit(1)
@@ -290,18 +283,14 @@ func main() {
 }
 
 func loadConfig() {
-	// Set default values to the XDG config directory
 	configDir := filepath.Join(xdg.ConfigHome, "readitlater")
 	homeDir := os.Getenv("HOME")
 	if homeDir == "" {
 		homeDir = "~"
 	}
-	config = Config{
-		Backend:            "org",
-		OrgFilepath:        filepath.Join(configDir, "ReadItLater.org"),
-		OrgArchiveFilepath: []string{filepath.Join(configDir, "ReadItLater.org_archive"), filepath.Join(configDir, "Orgmode.org_archive")},
-		TaskrcPath:         filepath.Join(homeDir, ".taskrc"),
-	}
+
+	// Start with only the default backend; backend-specific defaults are applied below
+	config = Config{Backend: "org"}
 
 	// Load from XDG config path
 	var err error
@@ -312,12 +301,48 @@ func loadConfig() {
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		// Save default config if it doesn't exist
+		// New install: apply org defaults and save
+		config.OrgFilepath = filepath.Join(configDir, "ReadItLater.org")
+		config.OrgArchiveFilepath = []string{
+			filepath.Join(configDir, "ReadItLater.org_archive"),
+			filepath.Join(configDir, "Orgmode.org_archive"),
+		}
 		saveConfig()
 	} else {
 		data, err := os.ReadFile(configPath)
-		if err == nil {
-			json.Unmarshal(data, &config)
+		if err != nil {
+			notify("Error", fmt.Sprintf("Failed to read config: %v", err))
+			return
+		}
+		if err := json.Unmarshal(data, &config); err != nil {
+			notify("Error", fmt.Sprintf("Invalid config file (%s): %v", configPath, err))
+			os.Exit(1)
+		}
+	}
+
+	// Expand environment variables in path fields
+	config.TaskrcPath = os.ExpandEnv(config.TaskrcPath)
+	config.OrgFilepath = os.ExpandEnv(config.OrgFilepath)
+	for i, p := range config.OrgArchiveFilepath {
+		config.OrgArchiveFilepath[i] = os.ExpandEnv(p)
+	}
+
+	// Apply defaults only for the configured backend's missing fields
+	switch config.Backend {
+	case "taskwarrior":
+		if config.TaskrcPath == "" {
+			config.TaskrcPath = filepath.Join(homeDir, ".taskrc")
+		}
+	default:
+		config.Backend = "org"
+		if config.OrgFilepath == "" {
+			config.OrgFilepath = filepath.Join(configDir, "ReadItLater.org")
+		}
+		if len(config.OrgArchiveFilepath) == 0 {
+			config.OrgArchiveFilepath = []string{
+				filepath.Join(configDir, "ReadItLater.org_archive"),
+				filepath.Join(configDir, "Orgmode.org_archive"),
+			}
 		}
 	}
 }
