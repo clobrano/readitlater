@@ -250,12 +250,7 @@ func main() {
 	}
 
 	// Validate backend requirements
-	if config.Backend == "org" {
-		if _, err := os.Stat(config.OrgFilepath); os.IsNotExist(err) {
-			notify("Warning", fmt.Sprintf("Could not find: %s", config.OrgFilepath))
-			os.Exit(1)
-		}
-	} else if config.Backend == "taskwarrior" {
+	if config.Backend == "taskwarrior" {
 		if !commandExists("task") {
 			notify("Error", "Taskwarrior (task) command not found. Please install taskwarrior.")
 			os.Exit(1)
