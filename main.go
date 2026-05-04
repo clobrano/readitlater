@@ -310,9 +310,21 @@ func loadConfig() {
 		saveConfig()
 	} else {
 		data, err := os.ReadFile(configPath)
-		if err == nil {
-			json.Unmarshal(data, &config)
+		if err != nil {
+			notify("Error", fmt.Sprintf("Failed to read config: %v", err))
+			return
 		}
+		if err := json.Unmarshal(data, &config); err != nil {
+			notify("Error", fmt.Sprintf("Invalid config file (%s): %v", configPath, err))
+			os.Exit(1)
+		}
+	}
+
+	// Expand environment variables in path fields
+	config.TaskrcPath = os.ExpandEnv(config.TaskrcPath)
+	config.OrgFilepath = os.ExpandEnv(config.OrgFilepath)
+	for i, p := range config.OrgArchiveFilepath {
+		config.OrgArchiveFilepath[i] = os.ExpandEnv(p)
 	}
 
 	// Apply defaults only for the configured backend's missing fields
