@@ -217,9 +217,7 @@ func getBackend() Backend {
 	switch config.Backend {
 	case "taskwarrior":
 		return NewTaskwarriorBackend(config.TaskrcPath)
-	case "org":
-		fallthrough
-	default:
+	default: // "org"
 		return NewOrgBackend(config.OrgFilepath, config.OrgArchiveFilepath)
 	}
 }
@@ -290,18 +288,14 @@ func main() {
 }
 
 func loadConfig() {
-	// Set default values to the XDG config directory
 	configDir := filepath.Join(xdg.ConfigHome, "readitlater")
 	homeDir := os.Getenv("HOME")
 	if homeDir == "" {
 		homeDir = "~"
 	}
-	config = Config{
-		Backend:            "org",
-		OrgFilepath:        filepath.Join(configDir, "ReadItLater.org"),
-		OrgArchiveFilepath: []string{filepath.Join(configDir, "ReadItLater.org_archive"), filepath.Join(configDir, "Orgmode.org_archive")},
-		TaskrcPath:         filepath.Join(homeDir, ".taskrc"),
-	}
+
+	// Start with only the default backend; backend-specific defaults are applied below
+	config = Config{Backend: "org"}
 
 	// Load from XDG config path
 	var err error
@@ -312,12 +306,36 @@ func loadConfig() {
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		// Save default config if it doesn't exist
+		// New install: apply org defaults and save
+		config.OrgFilepath = filepath.Join(configDir, "ReadItLater.org")
+		config.OrgArchiveFilepath = []string{
+			filepath.Join(configDir, "ReadItLater.org_archive"),
+			filepath.Join(configDir, "Orgmode.org_archive"),
+		}
 		saveConfig()
 	} else {
 		data, err := os.ReadFile(configPath)
 		if err == nil {
 			json.Unmarshal(data, &config)
+		}
+	}
+
+	// Apply defaults only for the configured backend's missing fields
+	switch config.Backend {
+	case "taskwarrior":
+		if config.TaskrcPath == "" {
+			config.TaskrcPath = filepath.Join(homeDir, ".taskrc")
+		}
+	default:
+		config.Backend = "org"
+		if config.OrgFilepath == "" {
+			config.OrgFilepath = filepath.Join(configDir, "ReadItLater.org")
+		}
+		if len(config.OrgArchiveFilepath) == 0 {
+			config.OrgArchiveFilepath = []string{
+				filepath.Join(configDir, "ReadItLater.org_archive"),
+				filepath.Join(configDir, "Orgmode.org_archive"),
+			}
 		}
 	}
 }
